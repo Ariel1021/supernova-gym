@@ -2,124 +2,225 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Importar datos de Excel a Firebase</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Importar Compis - Gimnasio Supernova</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- PapaParse para procesar archivos CSV -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <!-- Firebase -->
+    <!-- SDK de Firebase (misma versión 10.8.0 que index.html) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 </head>
-<body class="bg-gray-900 text-white p-8 font-sans">
-    <div class="max-w-2xl mx-auto bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700">
-        <h1 class="text-2xl font-bold mb-2">Migrar Inventario a Firestore</h1>
-        <p class="text-sm text-gray-400 mb-6">Selecciona el archivo CSV exportado para cargar los compis y sus niveles por jugador.</p>
-
-        <input type="file" id="csvFile" accept=".csv" class="mb-4 block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700">
-
-        <button onclick="procesarCSV()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded shadow transition">
-            Iniciar Carga Masiva
-        </button>
-
-        <div id="log" class="mt-6 p-4 bg-gray-900 rounded h-64 overflow-y-auto font-mono text-xs text-green-400 border border-gray-700">
-            Esperando archivo...
+<body class="bg-gray-900 text-gray-100 p-6 font-sans min-h-screen">
+    <div class="max-w-4xl mx-auto bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700">
+        <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
+            <h1 class="text-2xl font-bold text-white">Importador Dinámico de Compis</h1>
+            <span id="estadoConexion" class="text-xs bg-yellow-600 text-white px-2.5 py-1 rounded">Verificando Firebase...</span>
         </div>
+
+        <p class="text-sm text-gray-400 mb-4">
+            Pegá el contenido completo de tu CSV (incluyendo la primera fila de encabezados) o copiá y pegá las celdas directamente desde Google Sheets.
+        </p>
+
+        <textarea id="datosPegados" rows="14" class="w-full p-3 bg-gray-900 border border-gray-600 rounded text-xs font-mono text-gray-200 mb-4 outline-none focus:border-blue-500" placeholder="Pegá acá tu CSV o las celdas copiadas de Google Sheets..."></textarea>
+
+        <div class="flex items-center gap-4">
+            <button id="btnSubir" onclick="importarDatos()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-6 rounded shadow transition">
+                Subir a Firestore
+            </button>
+            <button onclick="document.getElementById('datosPegados').value = ''; document.getElementById('log').textContent = '';" class="bg-gray-700 hover:bg-gray-600 text-white py-2.5 px-4 rounded text-sm transition">
+                Limpiar
+            </button>
+            <a href="index.html" class="ml-auto text-sm text-blue-400 hover:text-blue-300 underline">
+                Volver al Inventario →
+            </a>
+        </div>
+
+        <pre id="log" class="mt-4 p-4 bg-gray-950 border border-gray-800 rounded text-xs text-green-400 max-h-72 overflow-y-auto whitespace-pre-wrap"></pre>
     </div>
 
     <script>
-        // Configuración de tu proyecto en Firebase
+        // ==========================================
+        // 1. CONFIGURACIÓN DE FIREBASE
+        // ==========================================
+        // Reemplazá este bloque copiando exactamente el objeto firebaseConfig de tu app.js
         const firebaseConfig = {
-            apiKey: "TU_API_KEY",
+            apiKey: "AIzaSy...",
             authDomain: "pokemas-supernova.firebaseapp.com",
             projectId: "pokemas-supernova",
             storageBucket: "pokemas-supernova.appspot.com",
-            messagingSenderId: "TU_SENDER_ID",
-            appId: "TU_APP_ID"
+            messagingSenderId: "123456789...",
+            appId: "1:123456789...:web:abc123"
         };
 
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+        let db = null;
+        const badgeEstado = document.getElementById('estadoConexion');
 
-        function logMsg(mensaje) {
-            const logDiv = document.getElementById('log');
-            logDiv.innerHTML += `<div>> ${mensaje}</div>`;
-            logDiv.scrollTop = logDiv.scrollHeight;
+        try {
+            if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "TU_API_KEY") {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                badgeEstado.textContent = "Conectado a Firebase";
+                badgeEstado.className = "text-xs bg-green-600 text-white px-2.5 py-1 rounded";
+            } else {
+                badgeEstado.textContent = "Falta configurar firebaseConfig";
+                badgeEstado.className = "text-xs bg-red-600 text-white px-2.5 py-1 rounded";
+            }
+        } catch (e) {
+            badgeEstado.textContent = "Error al inicializar Firebase";
+            badgeEstado.className = "text-xs bg-red-600 text-white px-2.5 py-1 rounded";
+            console.error(e);
         }
 
-        function procesarCSV() {
-            const fileInput = document.getElementById('csvFile');
-            const file = fileInput.files[0];
+        // ==========================================
+        // 2. HELPERS DE PARSEO
+        // ==========================================
+        function normalizarClave(texto) {
+            return texto
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                .trim()
+                .split(/\s+/)
+                .map((palabra, index) => {
+                    if (index === 0) return palabra.toLowerCase();
+                    if (palabra.toUpperCase() === "EX") return "EX";
+                    return palabra.charAt(0).toUpperCase() + palabra.slice(1).toLowerCase();
+                })
+                .join('');
+        }
 
-            if (!file) {
-                alert("Por favor selecciona un archivo .csv primero.");
+        function dividirLinea(linea, separador) {
+            if (separador === '\t') return linea.split('\t');
+            const resultado = [];
+            let actual = '';
+            let dentroComillas = false;
+
+            for (let i = 0; i < linea.length; i++) {
+                const char = linea[i];
+                if (char === '"') {
+                    dentroComillas = !dentroComillas;
+                } else if (char === ',' && !dentroComillas) {
+                    resultado.push(actual);
+                    actual = '';
+                } else {
+                    actual += char;
+                }
+            }
+            resultado.push(actual);
+            return resultado;
+        }
+
+        // ==========================================
+        // 3. IMPORTACIÓN MASIVA
+        // ==========================================
+        async function importarDatos() {
+            const texto = document.getElementById('datosPegados').value;
+            const log = document.getElementById('log');
+            const btnSubir = document.getElementById('btnSubir');
+
+            log.className = "mt-4 p-4 bg-gray-950 border border-gray-800 rounded text-xs text-green-400 max-h-72 overflow-y-auto whitespace-pre-wrap";
+
+            if (!db) {
+                log.classList.replace("text-green-400", "text-red-400");
+                log.textContent = "Error: Primero tenés que pegar tus credenciales reales de Firebase en la variable firebaseConfig dentro de importar.html.";
                 return;
             }
 
-            logMsg("Procesando archivo CSV...");
+            if (!texto.trim()) {
+                log.classList.replace("text-green-400", "text-red-400");
+                log.textContent = "Error: El cuadro de texto está vacío.";
+                return;
+            }
 
-            Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
-                complete: async function(results) {
-                    const filas = results.data;
-                    const columnas = results.meta.fields;
-                    
-                    if (!columnas || columnas.length < 3) {
-                        logMsg("[ERROR] No se detectaron las columnas correctamente.");
-                        return;
+            const lineas = texto.split(/\r?\n/).filter(l => l.trim() !== "");
+            if (lineas.length < 2) {
+                log.classList.replace("text-green-400", "text-red-400");
+                log.textContent = "Error: Se necesita al menos la fila de encabezados y una fila de datos.";
+                return;
+            }
+
+            btnSubir.disabled = true;
+            btnSubir.textContent = "Subiendo...";
+            log.textContent = "Analizando estructura y preparando documentos...\n";
+
+            const separador = lineas[0].includes('\t') ? '\t' : ',';
+            const encabezados = dividirLinea(lineas[0], separador).map(h => h.trim());
+
+            const atributosCompi = [
+                "Reclutamiento",
+                "Entorno EX",
+                "Baja Resiliencia",
+                "Aplica Vulnerabilidad"
+            ];
+
+            let tipoActual = "";
+            let batch = db.batch();
+            let operacionesEnBatch = 0;
+            let totalImportados = 0;
+
+            try {
+                for (let i = 1; i < lineas.length; i++) {
+                    const cols = dividirLinea(lineas[i], separador);
+
+                    if (cols[0] && cols[0].trim() !== "") {
+                        tipoActual = cols[0].trim();
                     }
 
-                    // Identificar cuál es la columna de Tipo, Compi y la lista de Jugadores
-                    const colTipoKey = columnas[0];  // Primera columna ("Tipo...")
-                    const colCompiKey = columnas[1]; // Segunda columna ("Compi...")
-                    const nombresJugadores = columnas.slice(2).map(j => j.trim());
+                    const nombreCompi = (cols[1] || "").trim();
+                    if (!nombreCompi) continue;
 
-                    logMsg(`Jugadores detectados (${nombresJugadores.length}): ${nombresJugadores.join(", ")}`);
+                    const niveles = {};
+                    const extras = {};
 
-                    let tipoActual = "";
-                    let totalCargados = 0;
+                    for (let c = 2; c < encabezados.length; c++) {
+                        const header = encabezados[c];
+                        if (!header || header.toLowerCase() === "espacio libre") continue;
 
-                    for (let fila of filas) {
-                        let valorTipo = fila[colTipoKey] ? fila[colTipoKey].trim() : "";
-                        let valorCompi = fila[colCompiKey] ? fila[colCompiKey].trim() : "";
+                        const valor = (cols[c] || "").trim();
 
-                        // Si encontramos un nuevo Tipo en la fila, lo actualizamos como "tipo activo"
-                        if (valorTipo !== "" && valorTipo !== "-") {
-                            tipoActual = valorTipo;
-                        }
-
-                        // Si la fila no tiene nombre de Compi o es una fila vacía de separación, la saltamos
-                        if (!valorCompi || valorCompi === "" || valorCompi === "-") {
-                            continue;
-                        }
-
-                        // Mapear los niveles de cada jugador para este compi
-                        let niveles = {};
-                        nombresJugadores.forEach(jugador => {
-                            let nivel = fila[jugador] ? fila[jugador].trim() : "-";
-                            if (nivel !== "" && nivel !== "-") {
-                                niveles[jugador] = nivel;
-                            }
-                        });
-
-                        // Subir a Firestore
-                        try {
-                            await db.collection("compis").add({
-                                tipo: tipoActual,
-                                nombre: valorCompi,
-                                niveles: niveles
-                            });
-                            totalCargados++;
-                            logMsg(`[OK] Subido: [${tipoActual}] ${valorCompi}`);
-                        } catch (error) {
-                            logMsg(`[ERROR] Falló ${valorCompi}: ${error.message}`);
+                        if (atributosCompi.some(attr => attr.toLowerCase() === header.toLowerCase())) {
+                            const clave = normalizarClave(header);
+                            extras[clave] = valor || (header.toLowerCase() === "reclutamiento" ? "-" : "No");
+                        } else {
+                            niveles[header] = valor !== "" ? valor : "-";
                         }
                     }
 
-                    logMsg(`=======================================`);
-                    logMsg(`¡MIGRACIÓN COMPLETA! Se subieron ${totalCargados} compis.`);
+                    totalImportados++;
+
+                    const nuevoDoc = {
+                        orden: totalImportados,
+                        tipo: tipoActual,
+                        nombre: nombreCompi,
+                        niveles: niveles,
+                        ...extras
+                    };
+
+                    const docRef = db.collection("compis").doc();
+                    batch.set(docRef, nuevoDoc);
+                    operacionesEnBatch++;
+
+                    log.textContent += `[${tipoActual}] ${nombreCompi} -> Reclutamiento: ${nuevoDoc.reclutamiento || '-'}\n`;
+
+                    if (operacionesEnBatch === 450) {
+                        await batch.commit();
+                        batch = db.batch();
+                        operacionesEnBatch = 0;
+                    }
                 }
-            });
+
+                if (operacionesEnBatch > 0) {
+                    log.textContent += "\nEnviando lote final a Firestore...\n";
+                    await batch.commit();
+                }
+
+                log.textContent += `\n¡Importación completada! Se subieron ${totalImportados} parejas de compis a Firestore.`;
+            } catch (error) {
+                log.classList.replace("text-green-400", "text-red-400");
+                log.textContent += `\nError al subir a Firebase (${error.code || 'desconocido'}): ${error.message}`;
+                console.error(error);
+            } finally {
+                btnSubir.disabled = false;
+                btnSubir.textContent = "Subir a Firestore";
+            }
         }
     </script>
 </body>

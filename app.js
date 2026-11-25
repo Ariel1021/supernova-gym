@@ -31,10 +31,10 @@ try {
 // 2. DATOS DE ESTADO Y CONFIGURACIÓN
 // ==========================================
 let jugadores = [
-    "Alain", "Belphegor", "Bran", "Carlos Placencio", "Darrking", 
-    "EduKatsuragi", "Epsilon", "Gupi", "Lizero", "Mikaruge", 
-    "Mrtadeo", "Paquiao", "Punkthony", "Racso-DVLK", "Red 1996", 
-    "Santiastiadias", "Shoko", "Wiki", "XiaotingShine", "xRomdonx"
+    "Alain", "Belphegor", "Carlos Placencio", "Darrking", "EduKatsuragi", 
+    "Epsilon", "Gupi", "Juanpito", "Lizero", "Mikaruge", 
+    "Mrtadeo123", "Paquiao", "Punkthony", "Racso-DVLK", "Red 1996", 
+    "TheHappySobble", "Wiki", "XiaotingShine", "xRomdonx"
 ];
 
 const todosLosTipos = [
@@ -60,7 +60,12 @@ function cargarDatos() {
             snapshot.forEach((doc) => {
                 compis.push({ id: doc.id, ...doc.data() });
             });
-            compis.sort((a, b) => a.tipo.localeCompare(b.tipo));
+            compis.sort((a, b) => {
+                const ordenA = a.orden ?? Number.MAX_SAFE_INTEGER;
+                const ordenB = b.orden ?? Number.MAX_SAFE_INTEGER;
+                if (ordenA !== ordenB) return ordenA - ordenB;
+                return a.tipo.localeCompare(b.tipo);
+            });
             renderTable();
         });
     } else {
@@ -398,13 +403,25 @@ function procesarCompi() {
         const nombre = document.getElementById('inputNombreCompi').value.trim();
 
         if (tipo && nombre) {
-            const nuevoCompi = { tipo: tipo, nombre: nombre, niveles: {} };
+            // Calcula el último índice de ese tipo para insertarlo justo al final de su bloque
+            const compisDelMismoTipo = compis.filter(c => limpiarTexto(c.tipo) === limpiarTexto(tipo));
+            const ultimoOrdenTipo = compisDelMismoTipo.length > 0
+                ? Math.max(...compisDelMismoTipo.map(c => c.orden || 0))
+                : compis.length + 1;
+
+            const nuevoCompi = {
+                orden: ultimoOrdenTipo + 0.01,
+                tipo: tipo,
+                nombre: nombre,
+                niveles: {}
+            };
+
             if (db) {
                 db.collection("compis").add(nuevoCompi);
             } else {
                 nuevoCompi.id = Date.now().toString();
                 compis.push(nuevoCompi);
-                compis.sort((a, b) => a.tipo.localeCompare(b.tipo));
+                compis.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
                 renderTable();
             }
         }
